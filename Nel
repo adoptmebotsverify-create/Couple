@@ -1,0 +1,354 @@
+-- Couples Day Gift - SIMPLE VERSION
+-- Spawn and open a gift with heart particles and a pet
+
+local Players = game:GetService('Players')
+local UserInputService = game:GetService('UserInputService')
+local TweenService = game:GetService('TweenService')
+local Debris = game:GetService('Debris')
+local ReplicatedStorage = game:GetService('ReplicatedStorage')
+
+local LocalPlayer = Players.LocalPlayer
+local playerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+-- ==============================================
+-- SIMPLE PET LIST (no module loading)
+-- ==============================================
+
+local PetNames = {
+    "Shadow Dragon", "Bat Dragon", "Frost Dragon", "Giraffe", "Owl", "Parrot", "Crow",
+    "Evil Unicorn", "Arctic Reindeer", "Turtle", "Kangaroo", "Lion", "Elephant",
+    "Flamingo", "Blue Dog", "Pink Cat", "Cow", "Monkey King", "Nessie"
+}
+
+-- ==============================================
+-- CREATE GUI
+-- ==============================================
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "CouplesDayGift"
+screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.Parent = playerGui
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0, 300, 0, 200)
+mainFrame.Position = UDim2.new(0.5, -150, 0.5, -100)
+mainFrame.BackgroundColor3 = Color3.fromRGB(255, 105, 180) -- Pink
+mainFrame.Active = true
+mainFrame.Draggable = true
+mainFrame.Parent = screenGui
+
+local mainCorner = Instance.new("UICorner")
+mainCorner.CornerRadius = UDim.new(0, 10)
+mainCorner.Parent = mainFrame
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 40)
+title.BackgroundColor3 = Color3.fromRGB(255, 50, 100)
+title.Text = "❤️ COUPLES DAY ❤️"
+title.Font = Enum.Font.GothamBold
+title.TextSize = 18
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.Parent = mainFrame
+Instance.new("UICorner", title).CornerRadius = UDim.new(0, 10)
+
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.new(0, 30, 0, 30)
+closeBtn.Position = UDim2.new(1, -35, 0, 5)
+closeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+closeBtn.Text = "X"
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.TextSize = 16
+closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeBtn.Parent = title
+Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 6)
+
+-- Instructions
+local instLabel = Instance.new("TextLabel")
+instLabel.Size = UDim2.new(1, -20, 0, 30)
+instLabel.Position = UDim2.new(0, 10, 0, 45)
+instLabel.BackgroundTransparency = 1
+instLabel.Text = "Spawn a gift and open it!"
+instLabel.Font = Enum.Font.Gotham
+instLabel.TextSize = 12
+instLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+instLabel.Parent = mainFrame
+
+-- Button frame
+local buttonFrame = Instance.new("Frame")
+buttonFrame.Size = UDim2.new(1, -20, 0, 40)
+buttonFrame.Position = UDim2.new(0, 10, 0, 80)
+buttonFrame.BackgroundTransparency = 1
+buttonFrame.Parent = mainFrame
+
+-- Spawn button
+local spawnBtn = Instance.new("TextButton")
+spawnBtn.Size = UDim2.new(0.45, -5, 1, 0)
+spawnBtn.Position = UDim2.new(0, 0, 0, 0)
+spawnBtn.BackgroundColor3 = Color3.fromRGB(255, 215, 0)
+spawnBtn.Text = "🎁 SPAWN"
+spawnBtn.Font = Enum.Font.GothamBold
+spawnBtn.TextSize = 12
+spawnBtn.TextColor3 = Color3.fromRGB(0, 0, 0)
+spawnBtn.Parent = buttonFrame
+Instance.new("UICorner", spawnBtn).CornerRadius = UDim.new(0, 6)
+
+-- Open button
+local openBtn = Instance.new("TextButton")
+openBtn.Size = UDim2.new(0.45, -5, 1, 0)
+openBtn.Position = UDim2.new(0.55, 0, 0, 0)
+openBtn.BackgroundColor3 = Color3.fromRGB(255, 105, 180)
+openBtn.Text = "💝 OPEN"
+openBtn.Font = Enum.Font.GothamBold
+openBtn.TextSize = 12
+openBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+openBtn.Parent = buttonFrame
+Instance.new("UICorner", openBtn).CornerRadius = UDim.new(0, 6)
+openBtn.Visible = false
+
+-- Status label
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Size = UDim2.new(1, -20, 0, 25)
+statusLabel.Position = UDim2.new(0, 10, 0, 125)
+statusLabel.BackgroundTransparency = 1
+statusLabel.Text = "Ready!"
+statusLabel.Font = Enum.Font.Gotham
+statusLabel.TextSize = 12
+statusLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+statusLabel.Parent = mainFrame
+
+-- Counter
+local countLabel = Instance.new("TextLabel")
+countLabel.Size = UDim2.new(1, -20, 0, 20)
+countLabel.Position = UDim2.new(0, 10, 1, -25)
+countLabel.BackgroundTransparency = 1
+countLabel.Text = "Opened: 0"
+countLabel.Font = Enum.Font.Gotham
+countLabel.TextSize = 11
+countLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+countLabel.Parent = mainFrame
+
+-- ==============================================
+-- GIFT FUNCTIONS
+-- ==============================================
+
+local currentGift = nil
+local currentPet = nil
+local openedCount = 0
+
+local function createPart(size, color, pos)
+    local part = Instance.new("Part")
+    part.Size = size
+    part.Position = pos
+    part.Anchored = true
+    part.BrickColor = BrickColor.new(color)
+    part.Parent = workspace
+    return part
+end
+
+local function spawnGift()
+    local character = LocalPlayer.Character
+    if not character or not character:FindFirstChild("HumanoidRootPart") then
+        statusLabel.Text = "No character!"
+        return
+    end
+    
+    local rootPart = character.HumanoidRootPart
+    local playerPos = rootPart.Position
+    local direction = rootPart.CFrame.LookVector
+    
+    -- Spawn 5 studs in front
+    local giftPos = playerPos + direction * 5 + Vector3.new(0, 1, 0)
+    
+    -- Remove old gift
+    if currentGift then
+        currentGift:Destroy()
+    end
+    
+    -- Create simple gift box
+    local box = createPart(
+        Vector3.new(3, 3, 3),
+        Color3.fromRGB(255, 0, 0),
+        giftPos
+    )
+    
+    local lid = createPart(
+        Vector3.new(3.2, 0.5, 3.2),
+        Color3.fromRGB(255, 105, 180),
+        giftPos + Vector3.new(0, 1.8, 0)
+    )
+    
+    local ribbon = createPart(
+        Vector3.new(3.5, 0.2, 0.2),
+        Color3.fromRGB(255, 215, 0),
+        giftPos
+    )
+    
+    -- Group them
+    currentGift = Instance.new("Model")
+    currentGift.Name = "Gift"
+    box.Parent = currentGift
+    lid.Parent = currentGift
+    ribbon.Parent = currentGift
+    currentGift.Parent = workspace
+    
+    statusLabel.Text = "Gift spawned! Click OPEN"
+    openBtn.Visible = true
+end
+
+local function openGift()
+    if not currentGift then
+        statusLabel.Text = "Spawn a gift first!"
+        return
+    end
+    
+    statusLabel.Text = "Opening..."
+    
+    -- Find parts
+    local box, lid, ribbon
+    for _, child in pairs(currentGift:GetChildren()) do
+        if child:IsA("Part") then
+            if child.Size.Y > 2 then box = child end
+            if child.Size.Y < 1 and child.Size.X > 3 then lid = child end
+            if child.Size.X > 3 and child.Size.Y < 0.3 then ribbon = child end
+        end
+    end
+    
+    -- Animate lid
+    if lid then
+        local tween = TweenService:Create(lid, TweenInfo.new(0.5), {
+            Position = (box and box.Position or currentGift:GetPivot().Position) + Vector3.new(0, 4, 0)
+        })
+        tween:Play()
+    end
+    
+    -- Heart particles
+    local hearts = Instance.new("ParticleEmitter")
+    hearts.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+    hearts.Rate = 30
+    hearts.Lifetime = NumberRange.new(1.5)
+    hearts.Speed = NumberRange.new(2)
+    hearts.Color = ColorSequence.new(Color3.fromRGB(255, 105, 180))
+    hearts.Parent = box or currentGift
+    
+    task.wait(0.5)
+    
+    -- Create simple pet (sphere with face)
+    local pet = Instance.new("Model")
+    pet.Name = "Pet"
+    
+    local body = Instance.new("Part")
+    body.Size = Vector3.new(2, 2, 2)
+    body.Position = (box and box.Position or currentGift:GetPivot().Position) + Vector3.new(0, 1, 0)
+    body.Anchored = true
+    body.BrickColor = BrickColor.new(Color3.fromRGB(255, 105, 180))
+    body.Parent = pet
+    pet.PrimaryPart = body
+    
+    -- Eyes
+    local eye1 = Instance.new("Part")
+    eye1.Size = Vector3.new(0.3, 0.3, 0.3)
+    eye1.Position = body.Position + Vector3.new(-0.5, 0.3, 1)
+    eye1.Anchored = true
+    eye1.BrickColor = BrickColor.new(Color3.fromRGB(0, 0, 0))
+    eye1.Parent = pet
+    
+    local eye2 = Instance.new("Part")
+    eye2.Size = Vector3.new(0.3, 0.3, 0.3)
+    eye2.Position = body.Position + Vector3.new(0.5, 0.3, 1)
+    eye2.Anchored = true
+    eye2.BrickColor = BrickColor.new(Color3.fromRGB(0, 0, 0))
+    eye2.Parent = pet
+    
+    -- Smile
+    local smile = Instance.new("Part")
+    smile.Size = Vector3.new(1, 0.2, 0.2)
+    smile.Position = body.Position + Vector3.new(0, -0.3, 1)
+    smile.Anchored = true
+    smile.BrickColor = BrickColor.new(Color3.fromRGB(255, 255, 255))
+    smile.Parent = pet
+    
+    pet.Parent = workspace
+    
+    -- Rising animation
+    local rise = TweenService:Create(pet, TweenInfo.new(1), {
+        CFrame = CFrame.new(body.Position + Vector3.new(0, 3, 0))
+    })
+    rise:Play()
+    
+    -- Add text
+    local billboard = Instance.new("BillboardGui")
+    billboard.Size = UDim2.new(0, 150, 0, 30)
+    billboard.StudsOffset = Vector3.new(0, 2, 0)
+    billboard.Parent = body
+    
+    local text = Instance.new("TextLabel")
+    text.Size = UDim2.new(1, 0, 1, 0)
+    text.BackgroundTransparency = 1
+    text.Text = "❤️ HAPPY COUPLES DAY! ❤️"
+    text.TextColor3 = Color3.fromRGB(255, 105, 180)
+    text.TextScaled = true
+    text.Font = Enum.Font.GothamBold
+    text.Parent = billboard
+    
+    -- Update counter
+    openedCount = openedCount + 1
+    countLabel.Text = "Opened: " .. openedCount
+    statusLabel.Text = "Happy Couples Day! 🎉"
+    
+    -- Clean up gift
+    if currentGift then
+        currentGift:Destroy()
+        currentGift = nil
+    end
+    
+    openBtn.Visible = false
+    Debris:AddItem(pet, 30)
+    Debris:AddItem(hearts, 2)
+end
+
+-- ==============================================
+-- BUTTONS
+-- ==============================================
+
+spawnBtn.MouseButton1Click:Connect(spawnGift)
+openBtn.MouseButton1Click:Connect(openGift)
+
+closeBtn.MouseButton1Click:Connect(function()
+    if currentGift then currentGift:Destroy() end
+    screenGui:Destroy()
+end)
+
+-- Dragging
+local dragging = false
+local dragStart, startPos
+
+mainFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        dragStart = input.Position
+        startPos = mainFrame.Position
+    end
+end)
+
+mainFrame.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = false
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+        local delta = input.Position - dragStart
+        mainFrame.Position = UDim2.new(
+            startPos.X.Scale,
+            startPos.X.Offset + delta.X,
+            startPos.Y.Scale,
+            startPos.Y.Offset + delta.Y
+        )
+    end
+end)
+
+print("✅ COUPLES DAY GIFT READY!")
+print("1. Click SPAWN")
+print("2. Click OPEN")
