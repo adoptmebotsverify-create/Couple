@@ -1,0 +1,654 @@
+-- Couples Day Gift Spawner
+-- Spawn a gift that opens with hearts and reveals a pet!
+
+local Players = game:GetService('Players')
+local ReplicatedStorage = game:GetService('ReplicatedStorage')
+local UserInputService = game:GetService('UserInputService')
+local TweenService = game:GetService('TweenService')
+local Debris = game:GetService('Debris')
+local HttpService = game:GetService('HttpService')
+local RunService = game:GetService('RunService')
+
+local LocalPlayer = Players.LocalPlayer
+local playerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+-- Load pet modules from the first script
+local Fsys = require(ReplicatedStorage:WaitForChild("Fsys"))
+local LoadModule = Fsys.load
+
+local ClientData = LoadModule("ClientData")
+local InventoryDB = LoadModule("InventoryDB")
+local KindDB = LoadModule("KindDB")
+local DownloadClient = LoadModule("DownloadClient")
+local PetRigs = LoadModule("new:PetRigs")
+local RouterClient = LoadModule("RouterClient")
+local UIManager = LoadModule("UIManager")
+
+-- Make InventoryDB global
+_G.InventoryDB = InventoryDB
+
+-- ==============================================
+-- HIGH TIER PETS LIST (from first script)
+-- ==============================================
+
+local HighTierPets = {
+    "Shadow Dragon", "Bat Dragon", "Frost Dragon", "Giraffe", "Owl", "Parrot", "Crow",
+    "Evil Unicorn", "Arctic Reindeer", "Hedgehog", "Dalmatian", "Turtle", "Kangaroo",
+    "Lion", "Elephant", "Blazing Lion", "African Wild Dog", "Flamingo", "Diamond Butterfly",
+    "Mini Pig", "Caterpillar", "Albino Monkey", "Candyfloss Chick", "Pelican", "Blue Dog",
+    "Pink Cat", "Haetae", "Peppermint Penguin", "Winged Tiger", "Sugar Glider",
+    "Shark Puppy", "Goat", "Sheeeeep", "Lion Cub", "Nessie", "Frostbite Bear",
+    "Balloon Unicorn", "Honey Badger", "Hot Doggo", "Crocodile", "Hare", "Ram", "Yeti",
+    "Meerkat", "Jellyfish", "Happy Clown", "Orchid Butterfly", "Many Mackerel",
+    "Strawberry Shortcake Bat Dragon", "Zombie Buffalo", "Fairy Bat Dragon",
+    "Chocolate Chip Bat Dragon", "Cow", "Dragonfruit Fox", "Monkey King", "Cryptid",
+    "Undead Jousting Horse", "Mermicorn", "Frost Unicorn", "Irish Water Spaniel",
+    "Jekyll Hydra", "Papa Moose", "Strawberry Penguin", "Bush Elephant", "Cupid Dragon",
+    "Black-Chested Pheasant", "Alpaca", "Field Mouse", "Pineapple Owl", "Owlbear",
+    "Tio De Nadal", "Pig", "Royal Mistletroll", "Pirate Ghost Capuchin Monkey",
+    "Moose Calf", "Vampire Dragon", "Shrew", "Mechapup", "Bald Eagle",
+    "Ring-Tailed Lemur", "Tortuga De La Isla", "Werewolf", "Puffin", "Fallow Deer",
+    "Caelum Cervi", "Diamond Amazon", "Sea Slug", "Sugar Axolotl", "Purple Butterfly",
+    "Grim Dragon", "Brown Bear", "Polar Bear", "Sakura Spirit", "Platypus", "Groundhog",
+    "Lava Dragon", "Glacier Moth", "Emperor Gorilla", "2D Kitty", "Hyena",
+    "Arctic Dusk Dragon", "Alley Cat", "Siamese Cat", "Phantom Dragon",
+    "Christmas Pudding Pup", "Glacier Kitsune", "Giant Gold Scarab", "Diamond Albatross"
+}
+
+-- ==============================================
+-- COLLECT ALL PETS
+-- ==============================================
+
+local AllPets = {}
+
+-- Add pets from InventoryDB
+for id, info in pairs(InventoryDB.pets) do
+    if info.name then
+        table.insert(AllPets, {
+            id = id,
+            name = info.name,
+            kind = info.kind
+        })
+    end
+end
+
+-- Function to find pet ID by name
+local function FindPetId(petName)
+    for id, info in pairs(InventoryDB.pets) do
+        if info.name:lower() == petName:lower() then
+            return id
+        end
+    end
+    return nil
+end
+
+-- Add high tier pets
+for _, petName in ipairs(HighTierPets) do
+    local petId = FindPetId(petName)
+    if petId then
+        local alreadyAdded = false
+        for _, pet in ipairs(AllPets) do
+            if pet.name == petName then
+                alreadyAdded = true
+                break
+            end
+        end
+        if not alreadyAdded then
+            table.insert(AllPets, {
+                id = petId,
+                name = petName,
+                kind = InventoryDB.pets[petId].kind
+            })
+        end
+    end
+end
+
+print("✅ Loaded " .. #AllPets .. " pets for Couples Day gifts")
+
+-- ==============================================
+-- PET FUNCTIONS
+-- ==============================================
+
+local PetModelCache = {}
+local SpawnedPets = {}
+local SpawnedItems = {}
+
+local function GenerateUniqueID()
+    return HttpService:GenerateGUID(false)
+end
+
+local function GenerateUniquePetName()
+    local prefixes = {"❤️", "💕", "💖", "💗", "💓", "💘", "💝", "🌸", "🌹", "🥰"}
+    local names = {"Love", "Heart", "Cupid", "Romeo", "Juliet", "Sweet", "Darling", "Honey", "Baby", "Precious"}
+    
+    local usePrefix = math.random(1, 3) == 1
+    local name = names[math.random(1, #names)]
+    
+    if usePrefix then
+        return prefixes[math.random(1, #prefixes)] .. " " .. name
+    else
+        return name .. " " .. prefixes[math.random(1, #prefixes)]
+    end
+end
+
+local function FetchPetModel(petKind)
+    if PetModelCache[petKind] then
+        return PetModelCache[petKind]:Clone()
+    end
+    local success, model = pcall(function()
+        return DownloadClient.promise_download_copy("Pets", petKind):expect()
+    end)
+    if success and model then
+        PetModelCache[petKind] = model
+        return model:Clone()
+    end
+    return nil
+end
+
+local function CreateInventoryItem(itemId, category, properties)
+    local uniqueId = GenerateUniqueID()
+    local itemKindData = KindDB[itemId]
+
+    if not itemKindData then
+        warn("Item not found: " .. itemId)
+        return nil
+    end
+
+    properties = properties or {}
+    
+    local itemData = {
+        unique = uniqueId,
+        category = category,
+        id = itemId,
+        kind = itemKindData.kind,
+        newness_order = 990000,
+        properties = properties,
+        _source = "couples_gift"
+    }
+
+    local identity = get_thread_identity and get_thread_identity() or 8
+    set_thread_identity(2)
+    local inventory = ClientData.get("inventory")
+    if inventory and inventory[category] then
+        inventory[category][uniqueId] = itemData
+    end
+    set_thread_identity(identity)
+
+    if category == "pets" then
+        SpawnedPets[uniqueId] = { data = itemData, model = nil }
+    end
+    
+    SpawnedItems[uniqueId] = true
+
+    task.defer(function()
+        if UIManager and UIManager.apps and UIManager.apps.BackpackApp then
+            UIManager.apps.BackpackApp:refresh_rendered_items()
+        end
+    end)
+
+    return itemData
+end
+
+-- ==============================================
+= CREATE MAIN GUI
+-- ==============================================
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "CouplesDayGift"
+screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.Parent = playerGui
+
+-- Main frame (romantic theme)
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0, 350, 0, 250)
+mainFrame.Position = UDim2.new(0.5, -175, 0.5, -125)
+mainFrame.BackgroundColor3 = Color3.fromRGB(255, 105, 180) -- Hot pink
+mainFrame.Active = true
+mainFrame.Draggable = true
+mainFrame.Parent = screenGui
+
+-- Rounded corners
+local mainCorner = Instance.new("UICorner")
+mainCorner.CornerRadius = UDim.new(0, 20)
+mainCorner.Parent = mainFrame
+
+-- Heart border
+local border = Instance.new("UIStroke")
+border.Thickness = 4
+border.Color = Color3.fromRGB(255, 0, 0) -- Red
+border.Parent = mainFrame
+
+-- Title
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 50)
+title.BackgroundColor3 = Color3.fromRGB(255, 50, 100)
+title.Text = "❤️ COUPLES DAY GIFT ❤️"
+title.Font = Enum.Font.GothamBold
+title.TextSize = 18
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.Parent = mainFrame
+Instance.new("UICorner", title).CornerRadius = UDim.new(0, 20)
+
+-- Close button
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.new(0, 35, 0, 35)
+closeBtn.Position = UDim2.new(1, -45, 0, 7)
+closeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+closeBtn.Text = "✕"
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.TextSize = 18
+closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeBtn.Parent = title
+Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 8)
+
+-- Instructions
+local instLabel = Instance.new("TextLabel")
+instLabel.Size = UDim2.new(1, -20, 0, 40)
+instLabel.Position = UDim2.new(0, 10, 0, 55)
+instLabel.BackgroundTransparency = 1
+instLabel.Text = "Spawn a gift and open it to reveal a special Couples Day pet!"
+instLabel.Font = Enum.Font.Gotham
+instLabel.TextSize = 11
+instLabel.TextWrapped = true
+instLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+instLabel.Parent = mainFrame
+
+-- Button frame
+local buttonFrame = Instance.new("Frame")
+buttonFrame.Size = UDim2.new(1, -20, 0, 80)
+buttonFrame.Position = UDim2.new(0, 10, 0, 100)
+buttonFrame.BackgroundTransparency = 1
+buttonFrame.Parent = mainFrame
+
+-- Spawn Gift button
+local spawnBtn = Instance.new("TextButton")
+spawnBtn.Size = UDim2.new(0.45, -5, 0, 50)
+spawnBtn.Position = UDim2.new(0, 0, 0, 0)
+spawnBtn.BackgroundColor3 = Color3.fromRGB(255, 215, 0) -- Gold
+spawnBtn.Text = "🎁 SPAWN GIFT"
+spawnBtn.Font = Enum.Font.GothamBold
+spawnBtn.TextSize = 12
+spawnBtn.TextColor3 = Color3.fromRGB(0, 0, 0)
+spawnBtn.Parent = buttonFrame
+Instance.new("UICorner", spawnBtn).CornerRadius = UDim.new(0, 10)
+
+-- Open Gift button
+local openBtn = Instance.new("TextButton")
+openBtn.Size = UDim2.new(0.45, -5, 0, 50)
+openBtn.Position = UDim2.new(0.55, 0, 0, 0)
+openBtn.BackgroundColor3 = Color3.fromRGB(255, 105, 180) -- Pink
+openBtn.Text = "💝 OPEN GIFT"
+openBtn.Font = Enum.Font.GothamBold
+openBtn.TextSize = 12
+openBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+openBtn.Parent = buttonFrame
+Instance.new("UICorner", openBtn).CornerRadius = UDim.new(0, 10)
+openBtn.Visible = false -- Hidden until gift is spawned
+
+-- Status label
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Size = UDim2.new(1, -20, 0, 25)
+statusLabel.Position = UDim2.new(0, 10, 0, 165)
+statusLabel.BackgroundTransparency = 1
+statusLabel.Text = "Ready!"
+statusLabel.Font = Enum.Font.Gotham
+statusLabel.TextSize = 12
+statusLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+statusLabel.Parent = mainFrame
+
+-- Counter
+local countLabel = Instance.new("TextLabel")
+countLabel.Size = UDim2.new(1, -20, 0, 20)
+countLabel.Position = UDim2.new(0, 10, 1, -25)
+countLabel.BackgroundTransparency = 1
+countLabel.Text = "Gifts opened: 0"
+countLabel.Font = Enum.Font.Gotham
+countLabel.TextSize = 11
+countLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+countLabel.Parent = mainFrame
+
+-- ==============================================
+-- GIFT FUNCTIONS
+-- ==============================================
+
+local currentGift = nil
+local currentPet = nil
+local giftCount = 0
+
+local function createCouplesGift()
+    local character = LocalPlayer.Character
+    if not character or not character:FindFirstChild("HumanoidRootPart") then
+        statusLabel.Text = "No character found!"
+        return
+    end
+    
+    local rootPart = character.HumanoidRootPart
+    local playerPos = rootPart.Position
+    local direction = rootPart.CFrame.LookVector
+    
+    -- Spawn position 5 studs in front of player
+    local giftPos = playerPos + direction * 5 + Vector3.new(0, 1, 0)
+    
+    -- Remove old gift if exists
+    if currentGift then
+        currentGift:Destroy()
+    end
+    
+    -- Create gift model
+    local gift = Instance.new("Model")
+    gift.Name = "CouplesGift"
+    
+    -- Gift box (red with pink accents)
+    local box = Instance.new("Part")
+    box.Size = Vector3.new(4, 4, 4)
+    box.Position = giftPos
+    box.Anchored = true
+    box.BrickColor = BrickColor.new(Color3.fromRGB(255, 50, 50)) -- Red
+    box.Material = Enum.Material.SmoothPlastic
+    box.Parent = gift
+    
+    -- Gift lid (pink)
+    local lid = Instance.new("Part")
+    lid.Size = Vector3.new(4.2, 0.8, 4.2)
+    lid.Position = giftPos + Vector3.new(0, 2.2, 0)
+    lid.Anchored = true
+    lid.BrickColor = BrickColor.new(Color3.fromRGB(255, 105, 180)) -- Pink
+    lid.Material = Enum.Material.SmoothPlastic
+    lid.Parent = gift
+    
+    -- Gold ribbon (horizontal)
+    local ribbonH = Instance.new("Part")
+    ribbonH.Size = Vector3.new(4.5, 0.3, 0.3)
+    ribbonH.Position = giftPos
+    ribbonH.Anchored = true
+    ribbonH.BrickColor = BrickColor.new(Color3.fromRGB(255, 215, 0)) -- Gold
+    ribbonH.Material = Enum.Material.Neon
+    ribbonH.Parent = gift
+    
+    -- Gold ribbon (vertical)
+    local ribbonV = Instance.new("Part")
+    ribbonV.Size = Vector3.new(0.3, 4.5, 0.3)
+    ribbonV.Position = giftPos
+    ribbonV.Anchored = true
+    ribbonV.BrickColor = BrickColor.new(Color3.fromRGB(255, 215, 0))
+    ribbonV.Material = Enum.Material.Neon
+    ribbonV.Parent = gift
+    
+    -- Bow
+    local bow1 = Instance.new("Part")
+    bow1.Size = Vector3.new(1, 0.4, 0.4)
+    bow1.Position = giftPos + Vector3.new(1.5, 2.5, 0)
+    bow1.Anchored = true
+    bow1.BrickColor = BrickColor.new(Color3.fromRGB(255, 215, 0))
+    bow1.Material = Enum.Material.Neon
+    bow1.Orientation = Vector3.new(0, 45, 0)
+    bow1.Parent = gift
+    
+    local bow2 = Instance.new("Part")
+    bow2.Size = Vector3.new(1, 0.4, 0.4)
+    bow2.Position = giftPos + Vector3.new(-1.5, 2.5, 0)
+    bow2.Anchored = true
+    bow2.BrickColor = BrickColor.new(Color3.fromRGB(255, 215, 0))
+    bow2.Material = Enum.Material.Neon
+    bow2.Orientation = Vector3.new(0, -45, 0)
+    bow2.Parent = gift
+    
+    -- Heart decorations
+    for i = 1, 4 do
+        local heart = Instance.new("Part")
+        heart.Size = Vector3.new(0.5, 0.5, 0.5)
+        heart.Position = giftPos + Vector3.new(math.random(-1.5, 1.5), 0.5, math.random(-1.5, 1.5))
+        heart.Anchored = true
+        heart.BrickColor = BrickColor.new(Color3.fromRGB(255, 105, 180))
+        heart.Material = Enum.Material.Neon
+        heart.Parent = gift
+    end
+    
+    gift.Parent = workspace
+    
+    -- Store current gift
+    currentGift = gift
+    
+    -- Show open button
+    openBtn.Visible = true
+    statusLabel.Text = "Gift spawned! Click OPEN GIFT"
+    
+    return gift
+end
+
+local function openCouplesGift()
+    if not currentGift then
+        statusLabel.Text = "No gift to open! Spawn one first."
+        return
+    end
+    
+    statusLabel.Text = "Opening gift..."
+    
+    -- Get gift position
+    local giftPos = currentGift:GetPivot().Position
+    
+    -- Find lid and box
+    local lid = nil
+    local box = nil
+    for _, child in pairs(currentGift:GetChildren()) do
+        if child:IsA("Part") then
+            if child.Size.Y > 3 then
+                box = child
+            elseif child.Size.Y < 1 and child.Size.X > 4 then
+                lid = child
+            end
+        end
+    end
+    
+    -- Animate lid opening
+    if lid then
+        local tween = TweenService:Create(lid, TweenInfo.new(0.8, Enum.EasingStyle.Back), {
+            Position = giftPos + Vector3.new(0, 5, 2)
+        })
+        tween:Play()
+    end
+    
+    -- Heart particle effect
+    local hearts = Instance.new("ParticleEmitter")
+    hearts.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+    hearts.Rate = 50
+    hearts.Lifetime = NumberRange.new(2)
+    hearts.Speed = NumberRange.new(2, 5)
+    hearts.SpreadAngle = Vector2.new(360, 360)
+    hearts.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 0, 0)),
+        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 105, 180)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 0, 0))
+    })
+    hearts.Parent = box or currentGift
+    
+    task.wait(0.5)
+    
+    -- Select random pet
+    local petData = AllPets[math.random(1, #AllPets)]
+    
+    -- Create properties
+    local properties = {
+        pet_trick_level = 5,
+        age = math.random(1, 6),
+        ailments_completed = 0,
+        rp_name = GenerateUniquePetName(),
+        flyable = true,
+        rideable = true,
+        mega_neon = false,
+        neon = false
+    }
+    
+    -- Create inventory item
+    CreateInventoryItem(petData.id, "pets", properties)
+    
+    -- Load pet model
+    local model = FetchPetModel(petData.kind)
+    
+    if not model then
+        -- Fallback model
+        model = Instance.new("Model")
+        model.Name = petData.name
+        
+        local part = Instance.new("Part")
+        part.Size = Vector3.new(2, 2, 2)
+        part.BrickColor = BrickColor.new(Color3.fromRGB(255, 105, 180))
+        part.Parent = model
+        model.PrimaryPart = part
+    else
+        model:ScaleTo(1.2)
+    end
+    
+    -- Position pet rising from box
+    model:SetPrimaryPartCFrame(CFrame.new(giftPos + Vector3.new(0, 1, 0)))
+    model.Parent = workspace
+    
+    -- Rising animation
+    local riseTween = TweenService:Create(model, TweenInfo.new(1, Enum.EasingStyle.Quad), {
+        CFrame = CFrame.new(giftPos + Vector3.new(0, 4, 0))
+    })
+    riseTween:Play()
+    
+    -- Add floating animation
+    spawn(function()
+        local baseY = 4
+        local time = 0
+        while model and model.Parent do
+            time = time + 0.05
+            local yOffset = math.sin(time) * 0.3
+            model:SetPrimaryPartCFrame(CFrame.new(giftPos + Vector3.new(0, baseY + yOffset, 0)))
+            task.wait(0.05)
+        end
+    end)
+    
+    -- Add "Happy Couples Day!" text
+    local billboard = Instance.new("BillboardGui")
+    billboard.Size = UDim2.new(0, 200, 0, 50)
+    billboard.StudsOffset = Vector3.new(0, 3, 0)
+    billboard.AlwaysOnTop = true
+    billboard.Parent = model.PrimaryPart or model
+    
+    local text = Instance.new("TextLabel")
+    text.Size = UDim2.new(1, 0, 1, 0)
+    text.BackgroundTransparency = 1
+    text.Text = "❤️ HAPPY COUPLES DAY! ❤️"
+    text.TextColor3 = Color3.fromRGB(255, 105, 180)
+    text.TextScaled = true
+    text.Font = Enum.Font.GothamBold
+    text.Parent = billboard
+    
+    -- Add heart particles around pet
+    local petHearts = Instance.new("ParticleEmitter")
+    petHearts.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+    petHearts.Rate = 20
+    petHearts.Lifetime = NumberRange.new(1.5)
+    petHearts.Speed = NumberRange.new(1, 2)
+    petHearts.Color = ColorSequence.new(Color3.fromRGB(255, 105, 180))
+    petHearts.Parent = model.PrimaryPart or model
+    
+    -- Highlight pet
+    local highlight = Instance.new("Highlight")
+    highlight.Adornee = model
+    highlight.FillColor = Color3.fromRGB(255, 105, 180)
+    highlight.FillTransparency = 0.3
+    highlight.OutlineColor = Color3.fromRGB(255, 0, 0)
+    highlight.Parent = model
+    
+    -- Fade out gift box
+    for _, child in pairs(currentGift:GetChildren()) do
+        if child:IsA("Part") then
+            local fade = TweenService:Create(child, TweenInfo.new(1), {Transparency = 1})
+            fade:Play()
+        end
+    end
+    
+    -- Update counters
+    giftCount = giftCount + 1
+    countLabel.Text = "Gifts opened: " .. giftCount
+    statusLabel.Text = "You got: " .. petData.name .. "! ❤️"
+    
+    -- Hide open button
+    openBtn.Visible = false
+    
+    -- Clean up
+    Debris:AddItem(currentGift, 2)
+    Debris:AddItem(model, 45)
+    Debris:AddItem(hearts, 3)
+    Debris:AddItem(petHearts, 3)
+    Debris:AddItem(highlight, 5)
+    
+    currentGift = nil
+end
+
+-- ==============================================
+-- BUTTON HANDLERS
+-- ==============================================
+
+spawnBtn.MouseButton1Click:Connect(function()
+    createCouplesGift()
+    
+    -- Button animation
+    TweenService:Create(spawnBtn, TweenInfo.new(0.1), {
+        Size = UDim2.new(0.48, -5, 0, 53)
+    }):Play()
+    task.wait(0.1)
+    TweenService:Create(spawnBtn, TweenInfo.new(0.1), {
+        Size = UDim2.new(0.45, -5, 0, 50)
+    }):Play()
+end)
+
+openBtn.MouseButton1Click:Connect(function()
+    openCouplesGift()
+    
+    -- Button animation
+    TweenService:Create(openBtn, TweenInfo.new(0.1), {
+        Size = UDim2.new(0.48, -5, 0, 53)
+    }):Play()
+    task.wait(0.1)
+    TweenService:Create(openBtn, TweenInfo.new(0.1), {
+        Size = UDim2.new(0.45, -5, 0, 50)
+    }):Play()
+end)
+
+closeBtn.MouseButton1Click:Connect(function()
+    if currentGift then
+        currentGift:Destroy()
+    end
+    screenGui:Destroy()
+end)
+
+-- Make frame draggable
+local dragging = false
+local dragStart, startPos
+
+mainFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        dragStart = input.Position
+        startPos = mainFrame.Position
+    end
+end)
+
+mainFrame.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = false
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+        local delta = input.Position - dragStart
+        mainFrame.Position = UDim2.new(
+            startPos.X.Scale,
+            startPos.X.Offset + delta.X,
+            startPos.Y.Scale,
+            startPos.Y.Offset + delta.Y
+        )
+    end
+end)
+
+print("✅ COUPLES DAY GIFT SPAWNER LOADED!")
+print("❤️ " .. #AllPets .. " pets available!")
+print("1. Click SPAWN GIFT to create a gift box")
+print("2. Click OPEN GIFT to open it and reveal a pet!")
